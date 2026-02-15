@@ -1,186 +1,49 @@
 <!DOCTYPE html>
-<html lang="ar">
+<html lang="ar" dir="rtl">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-<title>USSD Beast Scanner</title>
-
-<script src="https://cdn.tailwindcss.com"></script>
-<script src="https://cdn.jsdelivr.net/npm/tesseract.js@4/dist/tesseract.min.js"></script>
-
-<style>
-.scan-box{
-  box-shadow: 0 0 25px #00ff88;
-}
-</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>قائمة الروابط الاحترافية</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* تخصيص بسيط للخطوط العربية */
+        @import url('https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700&display=swap');
+        body {
+            font-family: 'Tajawal', sans-serif;
+        }
+    </style>
 </head>
+<body class="bg-gray-50 min-h-screen flex items-center justify-center p-4">
 
-<body class="bg-black text-white text-center min-h-screen flex flex-col items-center p-4">
+    <div class="bg-white p-8 rounded-2xl shadow-xl w-full max-w-sm border border-gray-100">
+        
+        <div class="text-center mb-8">
+            <h2 class="text-2xl font-bold text-gray-800">قائمة الإصدارات</h2>
+            <p class="text-gray-500 text-sm mt-2">اختر الصفحة التي تريد الانتقال إليها</p>
+        </div>
 
-<h1 class="text-2xl font-bold mb-4">📷 وجه الكاميرا على الكود</h1>
+        <div class="flex flex-col space-y-4">
+            
+            <a href="Issue-1.html" class="flex items-center justify-center w-full px-6 py-3.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl transition-all duration-300 transform hover:-translate-y-1 hover:shadow-lg">
+                الإصدار الأول (Issue 1)
+            </a>
 
-<div class="relative w-full max-w-md">
+            <a href="Issue-2.html" class="flex items-center justify-center w-full px-6 py-3.5 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-xl transition-all duration-300 transform hover:-translate-y-1 hover:shadow-lg">
+                الإصدار الثاني (Issue 2)
+            </a>
 
-  <video id="camera"
-    class="w-full rounded-2xl shadow-2xl"
-    autoplay playsinline muted></video>
+            <a href="Issue-3.html" class="flex items-center justify-center w-full px-6 py-3.5 bg-purple-600 hover:bg-purple-700 text-white font-semibold rounded-xl transition-all duration-300 transform hover:-translate-y-1 hover:shadow-lg">
+                الإصدار الثالث (Issue 3)
+            </a>
 
-  <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
-    <div class="w-64 h-28 border-4 border-emerald-400 rounded-xl scan-box"></div>
-  </div>
+            <div class="border-t border-gray-200 my-2"></div>
 
-</div>
+            <a href="index.html" class="flex items-center justify-center w-full px-6 py-3.5 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold rounded-xl transition-all duration-300 border border-gray-300">
+                العودة للرئيسية
+            </a>
 
-<p id="status" class="mt-4 text-lg text-emerald-400">
-⏳ جاري التهيئة...
-</p>
-
-<canvas id="canvas" class="hidden"></canvas>
-
-<script>
-const video = document.getElementById("camera");
-const canvas = document.getElementById("canvas");
-const ctx = canvas.getContext("2d");
-const statusText = document.getElementById("status");
-
-let worker = null;
-let scanning = false;
-let busy = false;
-let dialing = false;
-let streamRef = null;
-
-// 🧠 استخراج ذكي يمنع دمج السطور
-function extractUSSDSmart(text){
-
-  if(!text) return null;
-
-  text = text
-    .replace(/[Oo]/g, "0")
-    .replace(/[lI]/g, "1");
-
-  const lines = text.split(/\n|\r/);
-
-  for(let line of lines){
-
-    let clean = line
-      .replace(/\s/g, "")
-      .replace(/[^\d*#]/g, "");
-
-    // كود كامل
-    const fullMatch = clean.match(/^\*\d{2,4}\*\d{10,20}#$/);
-    if(fullMatch) return fullMatch[0];
-
-    // رقم فقط في سطر واحد
-    const numberMatch = clean.match(/^\d{10,20}$/);
-    if(numberMatch){
-
-      const code = numberMatch[0];
-
-      function detectNetwork(len){
-        if(len === 14) return "*858*";
-        if(len === 15) return "*102*";
-        return "*858*";
-      }
-
-      const prefix = detectNetwork(code.length);
-      return `${prefix}${code}#`;
-    }
-  }
-
-  return null;
-}
-
-// 📳 اهتزاز
-function vibrate(){
-  if(navigator.vibrate) navigator.vibrate(200);
-}
-
-// 📞 اتصال آمن بدون loop
-function dialUSSD(code){
-  if(dialing) return;
-  dialing = true;
-
-  vibrate();
-  statusText.innerText = "📞 جاري الاتصال: " + code;
-
-  if(streamRef){
-    streamRef.getTracks().forEach(track => track.stop());
-  }
-
-  setTimeout(()=>{
-    window.location.href = "tel:" + encodeURIComponent(code);
-  }, 300);
-}
-
-// 🚀 Worker
-async function initWorker(){
-  worker = await Tesseract.createWorker({ logger: () => {} });
-  await worker.loadLanguage('eng');
-  await worker.initialize('eng');
-}
-
-// 📷 تشغيل الكاميرا
-async function startCamera(){
-  try{
-    streamRef = await navigator.mediaDevices.getUserMedia({
-      video:{ facingMode:"environment" },
-      audio:false
-    });
-
-    video.srcObject = streamRef;
-    statusText.innerText = "✅ الكاميرا جاهزة";
-    startScanning();
-
-  }catch(e){
-    statusText.innerText = "❌ فشل تشغيل الكاميرا — تأكد من HTTPS";
-  }
-}
-
-// 🔥 مسح سريع
-function startScanning(){
-  if(scanning) return;
-  scanning = true;
-
-  setInterval(async ()=>{
-    if(busy || dialing) return;
-    if(video.readyState !== 4) return;
-
-    busy = true;
-
-    const w = video.videoWidth;
-    const h = video.videoHeight;
-
-    const cropW = w * 0.6;
-    const cropH = h * 0.25;
-    const cropX = (w - cropW)/2;
-    const cropY = (h - cropH)/2;
-
-    canvas.width = cropW;
-    canvas.height = cropH;
-
-    ctx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
-
-    try{
-      const { data:{ text } } = await worker.recognize(canvas);
-      const ussd = extractUSSDSmart(text);
-
-      if(ussd && !dialing){
-        dialUSSD(ussd);
-      }
-    }catch(e){}
-
-    busy = false;
-
-  }, 700);
-}
-
-// 🚀 بدء
-(async ()=>{
-  statusText.innerText = "⚙️ جاري تهيئة المحرك...";
-  await initWorker();
-  await startCamera();
-})();
-</script>
+        </div>
+    </div>
 
 </body>
 </html>
