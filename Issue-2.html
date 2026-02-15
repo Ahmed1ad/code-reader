@@ -17,7 +17,7 @@
 
 <body class="bg-black text-white text-center min-h-screen flex flex-col items-center p-4">
 
-<h1 class="text-2xl font-bold mb-4">📷 وجه الكاميرا على الكود</h1>
+<h1 class="text-2xl font-bold mb-4">📷.V2 وجه الكاميرا على الكود</h1>
 
 <div class="relative w-full max-w-md">
 
@@ -49,34 +49,31 @@ let busy = false;
 let dialing = false;
 let streamRef = null;
 
-// 🧠 النسخة الذكية المحسنة
+const CONFIDENCE_THRESHOLD = 60; // 🔥 تقدر تعدلها
+
+// 🧠 استخراج ذكي آمن
 function extractUSSDSmart(text){
 
   if(!text) return null;
 
+  // ✅ 1. بحث مباشر في النص الأصلي
+  const direct = text.match(/\*858\*(\d{13,16})#/);
+  if(direct){
+    return `*858*${direct[1]}#`;
+  }
+
+  // 🧹 تصحيح OCR
   text = text
     .replace(/[Oo]/g, "0")
     .replace(/[lI]/g, "1");
 
   const lines = text.split(/\n|\r/);
 
+  // ✅ 2. رقم منفرد
   for(let line of lines){
-
-    let clean = line
-      .replace(/\s/g, "")
-      .replace(/[^\d*#]/g, "");
-
-    // ✅ يبحث عن الكود داخل السطر (الإصلاح المهم)
-    const embedded = clean.match(/\*858\*(\d{10,20})#/);
-    if(embedded){
-      return `*858*${embedded[1]}#`;
-    }
-
-    // ✅ رقم فقط
-    const numberMatch = clean.match(/^\d{10,20}$/);
-    if(numberMatch){
-      const code = numberMatch[0];
-      return `*858*${code}#`;
+    let digitsOnly = line.replace(/[^\d]/g, "");
+    if(/^\d{13,16}$/.test(digitsOnly)){
+      return `*858*${digitsOnly}#`;
     }
   }
 
@@ -88,7 +85,7 @@ function vibrate(){
   if(navigator.vibrate) navigator.vibrate(200);
 }
 
-// 📞 اتصال آمن بدون loop
+// 📞 اتصال آمن
 function dialUSSD(code){
   if(dialing) return;
   dialing = true;
@@ -129,7 +126,7 @@ async function startCamera(){
   }
 }
 
-// 🔥 مسح سريع
+// 🔥 مسح سريع مع فلتر الثقة
 function startScanning(){
   if(scanning) return;
   scanning = true;
@@ -154,12 +151,20 @@ function startScanning(){
     ctx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
 
     try{
-      const { data:{ text } } = await worker.recognize(canvas);
-      const ussd = extractUSSDSmart(text);
+      const { data } = await worker.recognize(canvas);
+
+      // 🔥 فلتر الثقة
+      if(data.confidence < CONFIDENCE_THRESHOLD){
+        busy = false;
+        return;
+      }
+
+      const ussd = extractUSSDSmart(data.text);
 
       if(ussd && !dialing){
         dialUSSD(ussd);
       }
+
     }catch(e){}
 
     busy = false;
