@@ -46,34 +46,48 @@ const statusText = document.getElementById("status");
 let worker = null;
 let scanning = false;
 let busy = false;
+let dialing = false;
+let streamRef = null;
 
-// 🧠 الدالة الذكية
+// 🧠 استخراج ذكي يمنع دمج السطور
 function extractUSSDSmart(text){
 
   if(!text) return null;
 
   text = text
-    .replace(/\s/g, "")
     .replace(/[Oo]/g, "0")
-    .replace(/[lI]/g, "1")
-    .replace(/[^\d*#]/g, "");
+    .replace(/[lI]/g, "1");
 
-  const fullMatch = text.match(/\*\d{2,4}\*\d{10,20}#/);
-  if(fullMatch) return fullMatch[0];
+  const lines = text.split(/\n|\r/);
 
-  const numberMatch = text.match(/\d{10,20}/);
-  if(!numberMatch) return null;
+  for(let line of lines){
 
-  const code = numberMatch[0];
+    let clean = line
+      .replace(/\s/g, "")
+      .replace(/[^\d*#]/g, "");
 
-  function detectNetwork(len){
-    if(len === 14) return "*858*";
-    if(len === 15) return "*102*";
-    return "*858*";
+    // كود كامل
+    const fullMatch = clean.match(/^\*\d{2,4}\*\d{10,20}#$/);
+    if(fullMatch) return fullMatch[0];
+
+    // رقم فقط في سطر واحد
+    const numberMatch = clean.match(/^\d{10,20}$/);
+    if(numberMatch){
+
+      const code = numberMatch[0];
+
+      function detectNetwork(len){
+        if(len === 14) return "*858*";
+        if(len === 15) return "*102*";
+        return "*858*";
+      }
+
+      const prefix = detectNetwork(code.length);
+      return `${prefix}${code}#`;
+    }
   }
 
-  const prefix = detectNetwork(code.length);
-  return `${prefix}${code}#`;
+  return null;
 }
 
 // 📳 اهتزاز
@@ -81,14 +95,24 @@ function vibrate(){
   if(navigator.vibrate) navigator.vibrate(200);
 }
 
-// 📞 اتصال
+// 📞 اتصال آمن بدون loop
 function dialUSSD(code){
+  if(dialing) return;
+  dialing = true;
+
   vibrate();
   statusText.innerText = "📞 جاري الاتصال: " + code;
-  window.location.href = "tel:" + encodeURIComponent(code);
+
+  if(streamRef){
+    streamRef.getTracks().forEach(track => track.stop());
+  }
+
+  setTimeout(()=>{
+    window.location.href = "tel:" + encodeURIComponent(code);
+  }, 300);
 }
 
-// 🚀 Worker سريع
+// 🚀 Worker
 async function initWorker(){
   worker = await Tesseract.createWorker({ logger: () => {} });
   await worker.loadLanguage('eng');
@@ -98,13 +122,15 @@ async function initWorker(){
 // 📷 تشغيل الكاميرا
 async function startCamera(){
   try{
-    const stream = await navigator.mediaDevices.getUserMedia({
+    streamRef = await navigator.mediaDevices.getUserMedia({
       video:{ facingMode:"environment" },
       audio:false
     });
-    video.srcObject = stream;
+
+    video.srcObject = streamRef;
     statusText.innerText = "✅ الكاميرا جاهزة";
     startScanning();
+
   }catch(e){
     statusText.innerText = "❌ فشل تشغيل الكاميرا — تأكد من HTTPS";
   }
@@ -116,7 +142,7 @@ function startScanning(){
   scanning = true;
 
   setInterval(async ()=>{
-    if(busy) return;
+    if(busy || dialing) return;
     if(video.readyState !== 4) return;
 
     busy = true;
@@ -138,8 +164,7 @@ function startScanning(){
       const { data:{ text } } = await worker.recognize(canvas);
       const ussd = extractUSSDSmart(text);
 
-      if(ussd){
-        scanning = false;
+      if(ussd && !dialing){
         dialUSSD(ussd);
       }
     }catch(e){}
