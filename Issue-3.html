@@ -3,56 +3,31 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-<title>Precision Legend</title>
+<title>Fast Lock Mode</title>
 
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4/dist/tesseract.min.js"></script>
 
 <style>
-.scan-box{
-  box-shadow:0 0 25px #00ff88;
-  transition:.2s;
-}
-.scan-success{
-  border-color:#22ff22!important;
-  box-shadow:0 0 45px #22ff22!important;
-}
-.scan-detect{
-  border-color:#ffee00!important;
-}
-.debug{
-  position:fixed;
-  bottom:10px;
-  left:10px;
-  background:#000a;
-  padding:8px 12px;
-  font-size:12px;
-  border-radius:8px;
-}
+.scan-box{box-shadow:0 0 25px #00ff88;transition:.2s;}
+.scan-success{border-color:#22ff22!important;box-shadow:0 0 40px #22ff22!important;}
+.scan-detect{border-color:#ffee00!important;}
 </style>
 </head>
 
 <body class="bg-black text-white text-center min-h-screen flex flex-col items-center p-4">
 
-<h1 class="text-2xl font-bold mb-2">👑 Precision Legend</h1>
+<h1 class="text-2xl font-bold mb-2">⚡ Fast Lock</h1>
 
 <div class="relative w-full max-w-md">
   <video id="camera" class="w-full rounded-2xl shadow-2xl" autoplay playsinline muted></video>
-
   <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
     <div id="scanBox" class="w-64 h-28 border-4 border-emerald-400 rounded-xl scan-box"></div>
   </div>
 </div>
 
 <p id="status" class="mt-3 text-emerald-400">⏳ Loading...</p>
-
-<!-- ⭐ عرض الكود -->
 <p id="detectedCode" class="mt-2 text-yellow-400 font-bold text-lg">—</p>
-
-<div id="debug" class="debug text-left">
-FPS: --<br>
-Confidence: --
-</div>
 
 <canvas id="canvas" class="hidden"></canvas>
 
@@ -62,17 +37,12 @@ const canvas=document.getElementById("canvas");
 const ctx=canvas.getContext("2d");
 const statusText=status;
 const scanBox=document.getElementById("scanBox");
-const debugBox=document.getElementById("debug");
 const detectedCodeEl=document.getElementById("detectedCode");
 
 let worker=null;
 let busy=false;
 let dialing=false;
 let streamRef=null;
-let lastTime=performance.now();
-let fps=0;
-
-const CONF=48;
 
 // ===== OffscreenCanvas =====
 let offCanvas=null,offCtx=null;
@@ -81,46 +51,32 @@ if(typeof OffscreenCanvas!=="undefined"){
   offCtx=offCanvas.getContext("2d");
 }
 
-// 🧠 عكس
-const rev=s=>s.split("").reverse().join("");
-
-// 🧠 استخراج ذكي مضبوط
+// 🧠 الاستخراج السريع المباشر
 function extractUSSDSmart(text){
 
   if(!text) return null;
 
-  // تصحيح OCR
   text=text.replace(/[Oo]/g,"0").replace(/[lI]/g,"1");
 
-  // ===== كود مباشر =====
-  const direct=text.match(/\*858\*(\d{13})#/);
-  if(direct) return direct[1];
+  // ✅ 1) بين *858* و #
+  let m=text.match(/\*858\*(\d{12,16})#/);
+  if(m) return m[1];
 
-  const lines=text.split(/\n|\r/);
+  // ✅ 2) رقم منفرد واضح
+  let digits=text.replace(/[^\d]/g,"");
 
-  for(let line of lines){
-
-    let digits=line.replace(/[^\d]/g,"");
-
-    // ⭐ فلتر ذكي (يبدأ بـ 8)
-    if(/^8\d{12}$/.test(digits)){
-      return digits;
-    }
-
-    // معكوس
-    const r=rev(digits);
-    if(/^8\d{12}$/.test(r)){
-      return r;
-    }
+  // طول الكارت الشائع 13
+  if(/^\d{13}$/.test(digits)){
+    return digits;
   }
 
   return null;
 }
 
-// 📳 اهتزاز
+// 📳
 const vibrate=()=>navigator.vibrate?.(200);
 
-// 📞 اتصال (بدون إغلاق الكاميرا)
+// 📞 اتصال بدون إغلاق الكاميرا
 function dialUSSD(code){
   if(dialing) return;
   dialing=true;
@@ -131,7 +87,7 @@ function dialUSSD(code){
 
   setTimeout(()=>{
     window.location.href="tel:"+encodeURIComponent(code);
-  },200);
+  },150);
 }
 
 // ===== Worker =====
@@ -158,18 +114,14 @@ async function startCamera(){
   }
 }
 
-// 🎯 pulse
+// ===== pulse =====
 function pulse(){
   scanBox.classList.add("scan-detect");
-  setTimeout(()=>scanBox.classList.remove("scan-detect"),90);
+  setTimeout(()=>scanBox.classList.remove("scan-detect"),80);
 }
 
-// ===== Main Loop =====
+// ===== Loop سريع =====
 async function scanLoop(){
-
-  const now=performance.now();
-  fps=Math.round(1000/(now-lastTime));
-  lastTime=now;
 
   if(!dialing && video.readyState===4 && !busy){
 
@@ -195,15 +147,10 @@ async function scanLoop(){
 
       if(data.text.trim()) pulse();
 
-      debugBox.innerHTML=
-        "FPS: "+fps+"<br>"+
-        "Confidence: "+data.confidence.toFixed(1);
+      const raw=extractUSSDSmart(data.text);
 
-      const rawCode=extractUSSDSmart(data.text);
-
-      // ⭐ عرض الكود
-      if(rawCode){
-        const ussd=`*858*${rawCode}#`;
+      if(raw){
+        const ussd=`*858*${raw}#`;
         detectedCodeEl.innerText=ussd;
 
         if(!dialing){
@@ -223,7 +170,7 @@ async function scanLoop(){
 
 // ===== Start =====
 (async()=>{
-  statusText.innerText="⚙️ Booting...";
+  statusText.innerText="⚙️ Booting Fast Mode...";
   await initWorker();
   await startCamera();
 })();
