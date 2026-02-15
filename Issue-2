@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="ar">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>USSD Scanner Pro</title>
+
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@4/dist/tesseract.min.js"></script>
+
+<style>
+.scan-box{
+  box-shadow: 0 0 25px #00ff88;
+}
+</style>
+</head>
+
+<body class="bg-black text-white min-h-screen flex flex-col items-center p-4">
+
+<h1 class="text-2xl font-bold mb-4 text-center">
+📷 وجه الكاميرا على الكود
+</h1>
+
+<!-- الكاميرا -->
+<div class="relative w-full max-w-md">
+
+  <video id="camera"
+    class="w-full rounded-2xl shadow-2xl"
+    autoplay playsinline muted></video>
+
+  <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
+    <div class="w-64 h-28 border-4 border-emerald-400 rounded-xl scan-box"></div>
+  </div>
+
+</div>
+
+<p id="status" class="mt-4 text-lg text-emerald-400">
+⏳ جاري التهيئة...
+</p>
+
+<!-- قائمة النتائج -->
+<div class="w-full max-w-md mt-6">
+  <h2 class="text-xl font-bold mb-2">📋 الأكواد المكتشفة</h2>
+  <div id="results" class="space-y-3"></div>
+</div>
+
+<canvas id="canvas" class="hidden"></canvas>
+
+<script>
+const video = document.getElementById("camera");
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+const statusText = document.getElementById("status");
+const resultsDiv = document.getElementById("results");
+
+let worker = null;
+let scanning = false;
+let busy = false;
+let streamRef = null;
+let detectedSet = new Set();
+
+// 🧠 استخراج ذكي (نظام محافظ)
+function extractUSSDSmart(text){
+
+  if(!text) return [];
+
+  text = text
+    .replace(/[Oo]/g, "0")
+    .replace(/[lI]/g, "1");
+
+  const foundCodes = [];
+  const lines = text.split(/\n|\r/);
+
+  for(let line of lines){
+
+    let clean = line
+      .replace(/\s/g, "")
+      .replace(/[^\d*#]/g, "");
+
+    // كود كامل
+    const fullMatch = clean.match(/^\*\d{2,4}\*\d{10,20}#$/);
+    if(fullMatch){
+      foundCodes.push(fullMatch[0]);
+      continue;
+    }
+
+    // رقم فقط
+    const numberMatch = clean.match(/^\d{10,20}$/);
+    if(numberMatch){
+
+      const code = numberMatch[0];
+
+      function detectNetwork(len){
+        if(len === 14) return "*858*";
+        if(len === 15) return "*102*";
+        return "*858*";
+      }
+
+      const prefix = detectNetwork(code.length);
+      foundCodes.push(`${prefix}${code}#`);
+    }
+  }
+
+  return foundCodes;
+}
+
+// ➕ إضافة نتيجة
+function addResult(code){
+
+  if(detectedSet.has(code)) return;
+  detectedSet.add(code);
+
+  const item = document.createElement("div");
+  item.className = "bg-gray-900 p-4 rounded-xl flex items-center justify-between";
+
+  item.innerHTML = `
+    <span class="text-sm break-all">${code}</span>
+    <button class="bg-emerald-500 px-4 py-2 rounded-lg font-bold">
+      اتصال
+    </button>
+  `;
+
+  const btn = item.querySelector("button");
+  btn.onclick = () => {
+    window.location.href = "tel:" + encodeURIComponent(code);
+  };
+
+  resultsDiv.prepend(item);
+}
+
+// 🚀 Worker
+async function initWorker(){
+  worker = await Tesseract.createWorker({ logger: () => {} });
+  await worker.loadLanguage('eng');
+  await worker.initialize('eng');
+}
+
+// 📷 تشغيل الكاميرا
+async function startCamera(){
+  try{
+    streamRef = await navigator.mediaDevices.getUserMedia({
+      video:{ facingMode:"environment" },
+      audio:false
+    });
+
+    video.srcObject = streamRef;
+    statusText.innerText = "✅ الكاميرا جاهزة";
+    startScanning();
+
+  }catch(e){
+    statusText.innerText = "❌ فشل تشغيل الكاميرا — تأكد من HTTPS";
+  }
+}
+
+// 🔥 مسح مستمر
+function startScanning(){
+  if(scanning) return;
+  scanning = true;
+
+  setInterval(async ()=>{
+    if(busy) return;
+    if(video.readyState !== 4) return;
+
+    busy = true;
+
+    const w = video.videoWidth;
+    const h = video.videoHeight;
+
+    const cropW = w * 0.6;
+    const cropH = h * 0.25;
+    const cropX = (w - cropW)/2;
+    const cropY = (h - cropH)/2;
+
+    canvas.width = cropW;
+    canvas.height = cropH;
+
+    ctx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
+
+    try{
+      const { data:{ text } } = await worker.recognize(canvas);
+      const codes = extractUSSDSmart(text);
+
+      codes.forEach(code => addResult(code));
+
+    }catch(e){}
+
+    busy = false;
+
+  }, 1000);
+}
+
+// 🚀 بدء
+(async ()=>{
+  statusText.innerText = "⚙️ جاري تهيئة المحرك...";
+  await initWorker();
+  await startCamera();
+})();
+</script>
+
+</body>
+</html>
