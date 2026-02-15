@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-<title>Vodafone USSD Scanner</title>
+<title>Vodafone Smart Scanner V2</title>
 
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4/dist/tesseract.min.js"></script>
@@ -59,11 +59,12 @@ let busy = false;
 let streamRef = null;
 let detectedSet = new Set();
 
-// 🧠 فلترة صارمة لفودافون فقط
+// 🧠 النسخة الذكية جدًا
 function extractUSSDSmart(text){
 
   if(!text) return [];
 
+  // تصحيح أخطاء OCR
   text = text
     .replace(/[Oo]/g, "0")
     .replace(/[lI]/g, "1");
@@ -73,21 +74,24 @@ function extractUSSDSmart(text){
 
   for(let line of lines){
 
-    let clean = line
-      .replace(/\s/g, "")
-      .replace(/[^\d*#]/g, "");
+    let cleanLine = line.replace(/\s/g, "");
 
-    // ✅ كود فودافون كامل فقط
-    const fullMatch = clean.match(/^\*858\*(\d{13,16})#$/);
-    if(fullMatch){
-      results.push(`*858*${fullMatch[1]}#`);
+    // ✅ 1. كود داخل جملة
+    const embedded = cleanLine.match(/\*858\*(\d{13,16})#/);
+    if(embedded){
+      const code = embedded[1];
+      results.push(`*858*${code}#`);
       continue;
     }
 
-    // ✅ رقم الكارت فقط
-    const numberMatch = clean.match(/^(\d{13,16})$/);
-    if(numberMatch){
-      results.push(`*858*${numberMatch[1]}#`);
+    // ✅ 2. رقم فقط
+    const numberOnly = cleanLine
+      .replace(/[^\d]/g, "")
+      .match(/^(\d{13,16})$/);
+
+    if(numberOnly){
+      const code = numberOnly[1];
+      results.push(`*858*${code}#`);
       continue;
     }
   }
@@ -175,7 +179,7 @@ function startScanning(){
 
     busy = false;
 
-  }, 1000);
+  }, 900);
 }
 
 // 🚀 بدء
