@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="ar">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>USSD Beast Scanner</title>
+
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@4/dist/tesseract.min.js"></script>
+
+<style>
+.scan-box{
+  box-shadow: 0 0 25px #00ff88;
+}
+</style>
+</head>
+
+<body class="bg-black text-white text-center min-h-screen flex flex-col items-center p-4">
+
+<h1 class="text-2xl font-bold mb-4">📷 وجه الكاميرا على الكود</h1>
+
+<div class="relative w-full max-w-md">
+
+  <video id="camera"
+    class="w-full rounded-2xl shadow-2xl"
+    autoplay playsinline muted></video>
+
+  <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
+    <div class="w-64 h-28 border-4 border-emerald-400 rounded-xl scan-box"></div>
+  </div>
+
+</div>
+
+<p id="status" class="mt-4 text-lg text-emerald-400">
+⏳ جاري التهيئة...
+</p>
+
+<canvas id="canvas" class="hidden"></canvas>
+
+<script>
+const video = document.getElementById("camera");
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+const statusText = document.getElementById("status");
+
+let worker = null;
+let scanning = false;
+let busy = false;
+let dialing = false;
+let streamRef = null;
+
+// 🧠 استخراج ذكي يمنع دمج السطور
+function extractUSSDSmart(text){
+
+  if(!text) return null;
+
+  text = text
+    .replace(/[Oo]/g, "0")
+    .replace(/[lI]/g, "1");
+
+  const lines = text.split(/\n|\r/);
+
+  for(let line of lines){
+
+    let clean = line
+      .replace(/\s/g, "")
+      .replace(/[^\d*#]/g, "");
+
+    // كود كامل
+    const fullMatch = clean.match(/^\*\d{2,4}\*\d{10,20}#$/);
+    if(fullMatch) return fullMatch[0];
+
+    // رقم فقط في سطر واحد
+    const numberMatch = clean.match(/^\d{10,20}$/);
+    if(numberMatch){
+
+      const code = numberMatch[0];
+
+      function detectNetwork(len){
+        if(len === 14) return "*858*";
+        if(len === 15) return "*102*";
+        return "*858*";
+      }
+
+      const prefix = detectNetwork(code.length);
+      return `${prefix}${code}#`;
+    }
+  }
+
+  return null;
+}
+
+// 📳 اهتزاز
+function vibrate(){
+  if(navigator.vibrate) navigator.vibrate(200);
+}
+
+// 📞 اتصال آمن بدون loop
+function dialUSSD(code){
+  if(dialing) return;
+  dialing = true;
+
+  vibrate();
+  statusText.innerText = "📞 جاري الاتصال: " + code;
+
+  if(streamRef){
+    streamRef.getTracks().forEach(track => track.stop());
+  }
+
+  setTimeout(()=>{
+    window.location.href = "tel:" + encodeURIComponent(code);
