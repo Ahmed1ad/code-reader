@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-<title>Fast Lock Ultimate</title>
+<title>Fast Lock Ultimate FIX</title>
 
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4/dist/tesseract.min.js"></script>
@@ -52,7 +52,7 @@ if(typeof OffscreenCanvas!=="undefined"){
   offCtx=offCanvas.getContext("2d");
 }
 
-// 🧠 استخراج ذكي قوي
+// 🧠 استخراج مرن وسريع
 function extractUSSDSmart(text){
 
   if(!text) return null;
@@ -63,23 +63,24 @@ function extractUSSDSmart(text){
   let normal=text.match(/\*858\*(\d{12,16})#/);
   if(normal) return normal[1];
 
-  // 🔥 الشكل المعكوس (زي صورتك)
-  let reversedPattern=text.match(/#(\d{12,16})\*858\*/);
-  if(reversedPattern) return reversedPattern[1];
+  // 🔥 الشكل المعكوس
+  let reversed=text.match(/#(\d{12,16})\*858\*/);
+  if(reversed) return reversed[1];
 
-  // ✅ رقم منفرد
+  // ✅ أي رقم واضح (مرن)
   let digits=text.replace(/[^\d]/g,"");
-  if(/^\d{13}$/.test(digits)){
+
+  if(/^\d{12,16}$/.test(digits)){
     return digits;
   }
 
   return null;
 }
 
-// 📳 اهتزاز
+// 📳
 const vibrate=()=>navigator.vibrate?.(200);
 
-// 📞 اتصال (بدون إغلاق الكاميرا)
+// 📞 اتصال بدون إغلاق الكاميرا
 function dialUSSD(code){
   if(dialing) return;
   dialing=true;
@@ -97,13 +98,11 @@ function dialUSSD(code){
 async function initWorker(){
   worker=await Tesseract.createWorker({logger:()=>{}});
   await worker.loadLanguage("eng");
+  await worker.initialize("eng"); // ⭐ الترتيب الصحيح
 
-  // ⚡ تسريع OCR
   await worker.setParameters({
     tessedit_char_whitelist:"0123456789*#"
   });
-
-  await worker.initialize("eng");
 }
 
 // ===== Camera =====
@@ -119,7 +118,8 @@ async function startCamera(){
     scanLoop();
 
   }catch(e){
-    statusText.innerText="❌ HTTPS required";
+    statusText.innerText="❌ Camera blocked — لازم HTTPS";
+    console.error(e);
   }
 }
 
