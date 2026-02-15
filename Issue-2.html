@@ -1,9 +1,9 @@
 <!DOCTYPE html>
 <html lang="ar">
 <head>
-<meta charset="UTF-8" />
+<meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-<title>USSD Turbo Max</title>
+<title>LEGEND MODE</title>
 
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4/dist/tesseract.min.js"></script>
@@ -11,167 +11,185 @@
 <style>
 .scan-box{
   box-shadow:0 0 25px #00ff88;
-  transition:all .25s ease;
+  transition:.18s;
 }
-.scan-success{
-  border-color:#22ff22 !important;
-  box-shadow:0 0 40px #22ff22 !important;
+.scan-detect{ border-color:#ffee00!important; }
+.scan-success{ border-color:#22ff22!important; box-shadow:0 0 50px #22ff22!important; }
+.debug{
+  position:fixed;bottom:10px;left:10px;
+  background:#000a;padding:8px 12px;
+  font-size:12px;border-radius:8px;
 }
 </style>
 </head>
 
 <body class="bg-black text-white text-center min-h-screen flex flex-col items-center p-4">
 
-<h1 class="text-2xl font-bold mb-4">⚡ الماسح الخارق</h1>
+<h1 class="text-2xl font-bold mb-2">🧿 LEGEND MODE</h1>
 
 <div class="relative w-full max-w-md">
-
-  <video id="camera"
-    class="w-full rounded-2xl shadow-2xl"
-    autoplay playsinline muted></video>
-
+  <video id="camera" class="w-full rounded-2xl shadow-2xl" autoplay playsinline muted></video>
   <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
     <div id="scanBox" class="w-64 h-28 border-4 border-emerald-400 rounded-xl scan-box"></div>
   </div>
-
 </div>
 
-<p id="status" class="mt-4 text-lg text-emerald-400">
-⏳ جاري التهيئة...
-</p>
+<p id="status" class="mt-3 text-emerald-400">⏳ Loading...</p>
+
+<div id="debug" class="debug text-left">
+FPS: --<br>
+Confidence: --<br>
+Worker: --
+</div>
 
 <canvas id="canvas" class="hidden"></canvas>
 
 <script>
-const video=document.getElementById("camera");
+const video=camera;
 const canvas=document.getElementById("canvas");
 const ctx=canvas.getContext("2d");
-const statusText=document.getElementById("status");
+const statusText=status;
 const scanBox=document.getElementById("scanBox");
+const debugBox=document.getElementById("debug");
 
-let worker=null;
+let workers=[];
 let busy=false;
 let dialing=false;
 let streamRef=null;
+let lastTime=performance.now();
+let fps=0;
 
-const CONFIDENCE_THRESHOLD=55;
+const WORKERS=2;
+const CONF=48;
 
-// ⚡ OffscreenCanvas
+// ===== OffscreenCanvas =====
 let offCanvas=null,offCtx=null;
 if(typeof OffscreenCanvas!=="undefined"){
-  offCanvas=new OffscreenCanvas(300,150);
+  offCanvas=new OffscreenCanvas(320,160);
   offCtx=offCanvas.getContext("2d");
 }
 
-// 🧠 استخراج ذكي ثابت
-function extractUSSDSmart(text){
+// ===== Utils =====
+const rev=s=>s.split("").reverse().join("");
 
+function extractUSSDSmart(text){
   if(!text) return null;
 
-  // 🔥 بحث دقيق بطول ثابت (13 رقم)
-  const direct=text.match(/\*858\*(\d{13})#/);
-  if(direct) return `*858*${direct[1]}#`;
+  // مباشر
+  let m=text.match(/\*858\*(\d{12,16})#/);
+  if(m) return `*858*${m[1]}#`;
 
-  // تصحيح OCR
+  // معكوس
+  let r=rev(text).match(/\*858\*(\d{12,16})#/);
+  if(r) return `*858*${r[1]}#`;
+
+  // تنظيف
   text=text.replace(/[Oo]/g,"0").replace(/[lI]/g,"1");
 
-  const lines=text.split(/\n|\r/);
+  let digits=text.replace(/[^\d]/g,"");
 
-  for(let line of lines){
-    let digits=line.replace(/[^\d]/g,"");
-    if(/^\d{13}$/.test(digits)){
-      return `*858*${digits}#`;
-    }
-  }
+  // فلتر ضوضاء
+  if(/(\d)\1{6,}/.test(digits)) return null;
+
+  if(/^\d{12,16}$/.test(digits))
+    return `*858*${digits}#`;
+
+  let rd=rev(digits);
+  if(/^\d{12,16}$/.test(rd))
+    return `*858*${rd}#`;
 
   return null;
 }
 
-// 📳 اهتزاز
-function vibrate(){
-  if(navigator.vibrate) navigator.vibrate(200);
-}
-
-// 📞 اتصال
+// ===== اتصال =====
 function dialUSSD(code){
   if(dialing) return;
   dialing=true;
 
   scanBox.classList.add("scan-success");
-  vibrate();
+  navigator.vibrate?.(200);
+  statusText.innerText="📞 "+code;
 
-  statusText.innerText="📞 جاري الاتصال: "+code;
+  streamRef?.getTracks().forEach(t=>t.stop());
 
-  if(streamRef){
-    streamRef.getTracks().forEach(t=>t.stop());
+  setTimeout(()=>location.href="tel:"+encodeURIComponent(code),200);
+}
+
+// ===== Workers =====
+async function initWorkers(){
+  for(let i=0;i<WORKERS;i++){
+    const w=await Tesseract.createWorker({logger:()=>{}});
+    await w.loadLanguage("eng");
+    await w.initialize("eng");
+    workers.push(w);
   }
-
-  setTimeout(()=>{
-    window.location.href="tel:"+encodeURIComponent(code);
-  },300);
 }
 
-// 🚀 Worker
-async function initWorker(){
-  worker=await Tesseract.createWorker({logger:()=>{}});
-  await worker.loadLanguage("eng");
-  await worker.initialize("eng");
-}
-
-// 📷 كاميرا
+// ===== Camera =====
 async function startCamera(){
   try{
     streamRef=await navigator.mediaDevices.getUserMedia({
-      video:{facingMode:"environment"},
-      audio:false
+      video:{facingMode:"environment"},audio:false
     });
-
     video.srcObject=streamRef;
-    statusText.innerText="✅ الكاميرا جاهزة";
+    statusText.innerText="✅ Ready";
     scanLoop();
-
   }catch(e){
-    statusText.innerText="❌ تأكد من HTTPS";
+    statusText.innerText="❌ HTTPS required";
   }
 }
 
-// ⚡ معالجة كل frame تقريباً
-async function scanLoop(){
-  if(dialing) return;
+// ===== Visual pulse =====
+function pulse(){
+  scanBox.classList.add("scan-detect");
+  setTimeout(()=>scanBox.classList.remove("scan-detect"),90);
+}
 
-  if(video.readyState===4 && !busy){
+// ===== Main Loop =====
+async function scanLoop(){
+
+  // FPS حساب
+  const now=performance.now();
+  fps=Math.round(1000/(now-lastTime));
+  lastTime=now;
+
+  if(!dialing && video.readyState===4 && !busy){
+
     busy=true;
 
     const w=video.videoWidth;
     const h=video.videoHeight;
 
-    const cropW=w*0.6;
-    const cropH=h*0.25;
-    const cropX=(w-cropW)/2;
-    const cropY=(h-cropH)/2;
+    const cw=w*0.6;
+    const ch=h*0.25;
+    const cx=(w-cw)/2;
+    const cy=(h-ch)/2;
 
-    if(offCanvas){
-      offCanvas.width=cropW;
-      offCanvas.height=cropH;
-      offCtx.drawImage(video,cropX,cropY,cropW,cropH,0,0,cropW,cropH);
-    }else{
-      canvas.width=cropW;
-      canvas.height=cropH;
-      ctx.drawImage(video,cropX,cropY,cropW,cropH,0,0,cropW,cropH);
-    }
+    const target=offCanvas||canvas;
+    const tctx=offCanvas?offCtx:ctx;
+
+    target.width=cw;
+    target.height=ch;
+    tctx.drawImage(video,cx,cy,cw,ch,0,0,cw,ch);
 
     try{
-      const {data}=await worker.recognize(offCanvas||canvas);
+      const workerIndex=Math.floor(Math.random()*workers.length);
+      const {data}=await workers[workerIndex].recognize(target);
+
+      if(data.text.trim()) pulse();
 
       const ussd=extractUSSDSmart(data.text);
 
-      // 🧠 فلتر ذكي
-      if(!ussd && data.confidence<CONFIDENCE_THRESHOLD){
+      // Debug
+      debugBox.innerHTML=
+        "FPS: "+fps+"<br>"+
+        "Confidence: "+data.confidence.toFixed(1)+"<br>"+
+        "Worker: "+workerIndex;
+
+      if(!ussd && data.confidence<CONF){
         busy=false;
       }else{
-        if(ussd && !dialing){
-          dialUSSD(ussd);
-        }
+        if(ussd) dialUSSD(ussd);
         busy=false;
       }
 
@@ -180,13 +198,13 @@ async function scanLoop(){
     }
   }
 
-  requestAnimationFrame(scanLoop); // 🔥 كل frame تقريباً
+  requestAnimationFrame(scanLoop);
 }
 
-// 🚀 بدء
+// ===== Start =====
 (async()=>{
-  statusText.innerText="⚙️ تهيئة المحرك...";
-  await initWorker();
+  statusText.innerText="⚙️ Booting Legend...";
+  await initWorkers();
   await startCamera();
 })();
 </script>
