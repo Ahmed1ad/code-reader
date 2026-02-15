@@ -3,24 +3,21 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-<title>USSD Beast Scanner</title>
+<title>USSD Turbo Scanner</title>
 
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4/dist/tesseract.min.js"></script>
 
 <style>
-.scan-box{
-  box-shadow: 0 0 25px #00ff88;
-}
+.scan-box{ box-shadow:0 0 25px #00ff88; }
 </style>
 </head>
 
 <body class="bg-black text-white text-center min-h-screen flex flex-col items-center p-4">
 
-<h1 class="text-2xl font-bold mb-4">📷.V2 وجه الكاميرا على الكود</h1>
+<h1 class="text-2xl font-bold mb-4">⚡ الماسح السريع</h1>
 
 <div class="relative w-full max-w-md">
-
   <video id="camera"
     class="w-full rounded-2xl shadow-2xl"
     autoplay playsinline muted></video>
@@ -28,7 +25,6 @@
   <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
     <div class="w-64 h-28 border-4 border-emerald-400 rounded-xl scan-box"></div>
   </div>
-
 </div>
 
 <p id="status" class="mt-4 text-lg text-emerald-400">
@@ -43,37 +39,40 @@ const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
 const statusText = document.getElementById("status");
 
-let worker = null;
-let scanning = false;
-let busy = false;
-let dialing = false;
-let streamRef = null;
+let worker=null;
+let scanning=false;
+let busy=false;
+let dialing=false;
+let streamRef=null;
 
-const CONFIDENCE_THRESHOLD = 60; // 🔥 تقدر تعدلها
+const CONFIDENCE_THRESHOLD = 55;
 
-// 🧠 استخراج ذكي آمن
+// 🚀 OffscreenCanvas (أسرع لو مدعوم)
+let offCanvas=null;
+let offCtx=null;
+if(typeof OffscreenCanvas!=="undefined"){
+  offCanvas=new OffscreenCanvas(300,150);
+  offCtx=offCanvas.getContext("2d");
+}
+
+// 🧠 استخراج ذكي
 function extractUSSDSmart(text){
 
   if(!text) return null;
 
-  // ✅ 1. بحث مباشر في النص الأصلي
-  const direct = text.match(/\*858\*(\d{13,16})#/);
-  if(direct){
-    return `*858*${direct[1]}#`;
-  }
+  // بحث مباشر أولاً
+  const direct=text.match(/\*858\*(\d{13,16})#/);
+  if(direct) return `*858*${direct[1]}#`;
 
-  // 🧹 تصحيح OCR
-  text = text
-    .replace(/[Oo]/g, "0")
-    .replace(/[lI]/g, "1");
+  // تصحيح OCR
+  text=text.replace(/[Oo]/g,"0").replace(/[lI]/g,"1");
 
-  const lines = text.split(/\n|\r/);
+  const lines=text.split(/\n|\r/);
 
-  // ✅ 2. رقم منفرد
   for(let line of lines){
-    let digitsOnly = line.replace(/[^\d]/g, "");
-    if(/^\d{13,16}$/.test(digitsOnly)){
-      return `*858*${digitsOnly}#`;
+    let digits=line.replace(/[^\d]/g,"");
+    if(/^\d{13,16}$/.test(digits)){
+      return `*858*${digits}#`;
     }
   }
 
@@ -85,81 +84,87 @@ function vibrate(){
   if(navigator.vibrate) navigator.vibrate(200);
 }
 
-// 📞 اتصال آمن
+// 📞 اتصال
 function dialUSSD(code){
   if(dialing) return;
-  dialing = true;
+  dialing=true;
 
   vibrate();
-  statusText.innerText = "📞 جاري الاتصال: " + code;
+  statusText.innerText="📞 جاري الاتصال: "+code;
 
   if(streamRef){
-    streamRef.getTracks().forEach(track => track.stop());
+    streamRef.getTracks().forEach(t=>t.stop());
   }
 
   setTimeout(()=>{
-    window.location.href = "tel:" + encodeURIComponent(code);
-  }, 300);
+    window.location.href="tel:"+encodeURIComponent(code);
+  },300);
 }
 
 // 🚀 Worker
 async function initWorker(){
-  worker = await Tesseract.createWorker({ logger: () => {} });
-  await worker.loadLanguage('eng');
-  await worker.initialize('eng');
+  worker=await Tesseract.createWorker({logger:()=>{}});
+  await worker.loadLanguage("eng");
+  await worker.initialize("eng");
 }
 
-// 📷 تشغيل الكاميرا
+// 📷 كاميرا
 async function startCamera(){
   try{
-    streamRef = await navigator.mediaDevices.getUserMedia({
-      video:{ facingMode:"environment" },
+    streamRef=await navigator.mediaDevices.getUserMedia({
+      video:{facingMode:"environment"},
       audio:false
     });
 
-    video.srcObject = streamRef;
-    statusText.innerText = "✅ الكاميرا جاهزة";
+    video.srcObject=streamRef;
+    statusText.innerText="✅ الكاميرا جاهزة";
     startScanning();
 
   }catch(e){
-    statusText.innerText = "❌ فشل تشغيل الكاميرا — تأكد من HTTPS";
+    statusText.innerText="❌ تأكد من HTTPS";
   }
 }
 
-// 🔥 مسح سريع مع فلتر الثقة
+// ⚡ مسح سريع جداً
 function startScanning(){
   if(scanning) return;
-  scanning = true;
+  scanning=true;
 
-  setInterval(async ()=>{
-    if(busy || dialing) return;
-    if(video.readyState !== 4) return;
+  setInterval(async()=>{
+    if(busy||dialing) return;
+    if(video.readyState!==4) return;
 
-    busy = true;
+    busy=true;
 
-    const w = video.videoWidth;
-    const h = video.videoHeight;
+    const w=video.videoWidth;
+    const h=video.videoHeight;
 
-    const cropW = w * 0.6;
-    const cropH = h * 0.25;
-    const cropX = (w - cropW)/2;
-    const cropY = (h - cropH)/2;
+    const cropW=w*0.6;
+    const cropH=h*0.25;
+    const cropX=(w-cropW)/2;
+    const cropY=(h-cropH)/2;
 
-    canvas.width = cropW;
-    canvas.height = cropH;
-
-    ctx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
+    // 🔥 استخدام OffscreenCanvas لو متاح
+    if(offCanvas){
+      offCanvas.width=cropW;
+      offCanvas.height=cropH;
+      offCtx.drawImage(video,cropX,cropY,cropW,cropH,0,0,cropW,cropH);
+    }else{
+      canvas.width=cropW;
+      canvas.height=cropH;
+      ctx.drawImage(video,cropX,cropY,cropW,cropH,0,0,cropW,cropH);
+    }
 
     try{
-      const { data } = await worker.recognize(canvas);
+      const {data}=await worker.recognize(offCanvas||canvas);
 
-      // 🔥 فلتر الثقة
-      if(data.confidence < CONFIDENCE_THRESHOLD){
-        busy = false;
+      const ussd=extractUSSDSmart(data.text);
+
+      // 🧠 فلتر ذكي
+      if(!ussd && data.confidence<CONFIDENCE_THRESHOLD){
+        busy=false;
         return;
       }
-
-      const ussd = extractUSSDSmart(data.text);
 
       if(ussd && !dialing){
         dialUSSD(ussd);
@@ -167,18 +172,17 @@ function startScanning(){
 
     }catch(e){}
 
-    busy = false;
+    busy=false;
 
-  }, 700);
+  },450); // ⚡ أسرع
 }
 
 // 🚀 بدء
-(async ()=>{
-  statusText.innerText = "⚙️ جاري تهيئة المحرك...";
+(async()=>{
+  statusText.innerText="⚙️ تهيئة المحرك...";
   await initWorker();
   await startCamera();
 })();
 </script>
-
 </body>
 </html>
