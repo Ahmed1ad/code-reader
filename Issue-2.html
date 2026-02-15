@@ -3,28 +3,37 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-<title>USSD Turbo Scanner V3</title>
+<title>USSD Turbo Max</title>
 
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4/dist/tesseract.min.js"></script>
 
 <style>
-.scan-box{ box-shadow:0 0 25px #00ff88; }
+.scan-box{
+  box-shadow:0 0 25px #00ff88;
+  transition:all .25s ease;
+}
+.scan-success{
+  border-color:#22ff22 !important;
+  box-shadow:0 0 40px #22ff22 !important;
+}
 </style>
 </head>
 
 <body class="bg-black text-white text-center min-h-screen flex flex-col items-center p-4">
 
-<h1 class="text-2xl font-bold mb-4">⚡ الماسح السريع</h1>
+<h1 class="text-2xl font-bold mb-4">⚡ الماسح الخارق</h1>
 
 <div class="relative w-full max-w-md">
+
   <video id="camera"
     class="w-full rounded-2xl shadow-2xl"
     autoplay playsinline muted></video>
 
   <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
-    <div class="w-64 h-28 border-4 border-emerald-400 rounded-xl scan-box"></div>
+    <div id="scanBox" class="w-64 h-28 border-4 border-emerald-400 rounded-xl scan-box"></div>
   </div>
+
 </div>
 
 <p id="status" class="mt-4 text-lg text-emerald-400">
@@ -34,34 +43,33 @@
 <canvas id="canvas" class="hidden"></canvas>
 
 <script>
-const video = document.getElementById("camera");
-const canvas = document.getElementById("canvas");
-const ctx = canvas.getContext("2d");
-const statusText = document.getElementById("status");
+const video=document.getElementById("camera");
+const canvas=document.getElementById("canvas");
+const ctx=canvas.getContext("2d");
+const statusText=document.getElementById("status");
+const scanBox=document.getElementById("scanBox");
 
 let worker=null;
-let scanning=false;
 let busy=false;
 let dialing=false;
 let streamRef=null;
 
-const CONFIDENCE_THRESHOLD = 55;
+const CONFIDENCE_THRESHOLD=55;
 
-// 🚀 OffscreenCanvas (أسرع لو مدعوم)
-let offCanvas=null;
-let offCtx=null;
+// ⚡ OffscreenCanvas
+let offCanvas=null,offCtx=null;
 if(typeof OffscreenCanvas!=="undefined"){
   offCanvas=new OffscreenCanvas(300,150);
   offCtx=offCanvas.getContext("2d");
 }
 
-// 🧠 استخراج ذكي
+// 🧠 استخراج ذكي ثابت
 function extractUSSDSmart(text){
 
   if(!text) return null;
 
-  // بحث مباشر أولاً
-  const direct=text.match(/\*858\*(\d{13,16})#/);
+  // 🔥 بحث دقيق بطول ثابت (13 رقم)
+  const direct=text.match(/\*858\*(\d{13})#/);
   if(direct) return `*858*${direct[1]}#`;
 
   // تصحيح OCR
@@ -71,7 +79,7 @@ function extractUSSDSmart(text){
 
   for(let line of lines){
     let digits=line.replace(/[^\d]/g,"");
-    if(/^\d{13,16}$/.test(digits)){
+    if(/^\d{13}$/.test(digits)){
       return `*858*${digits}#`;
     }
   }
@@ -89,7 +97,9 @@ function dialUSSD(code){
   if(dialing) return;
   dialing=true;
 
+  scanBox.classList.add("scan-success");
   vibrate();
+
   statusText.innerText="📞 جاري الاتصال: "+code;
 
   if(streamRef){
@@ -118,22 +128,18 @@ async function startCamera(){
 
     video.srcObject=streamRef;
     statusText.innerText="✅ الكاميرا جاهزة";
-    startScanning();
+    scanLoop();
 
   }catch(e){
     statusText.innerText="❌ تأكد من HTTPS";
   }
 }
 
-// ⚡ مسح سريع جداً
-function startScanning(){
-  if(scanning) return;
-  scanning=true;
+// ⚡ معالجة كل frame تقريباً
+async function scanLoop(){
+  if(dialing) return;
 
-  setInterval(async()=>{
-    if(busy||dialing) return;
-    if(video.readyState!==4) return;
-
+  if(video.readyState===4 && !busy){
     busy=true;
 
     const w=video.videoWidth;
@@ -144,7 +150,6 @@ function startScanning(){
     const cropX=(w-cropW)/2;
     const cropY=(h-cropH)/2;
 
-    // 🔥 استخدام OffscreenCanvas لو متاح
     if(offCanvas){
       offCanvas.width=cropW;
       offCanvas.height=cropH;
@@ -163,18 +168,19 @@ function startScanning(){
       // 🧠 فلتر ذكي
       if(!ussd && data.confidence<CONFIDENCE_THRESHOLD){
         busy=false;
-        return;
+      }else{
+        if(ussd && !dialing){
+          dialUSSD(ussd);
+        }
+        busy=false;
       }
 
-      if(ussd && !dialing){
-        dialUSSD(ussd);
-      }
+    }catch(e){
+      busy=false;
+    }
+  }
 
-    }catch(e){}
-
-    busy=false;
-
-  },450); // ⚡ أسرع
+  requestAnimationFrame(scanLoop); // 🔥 كل frame تقريباً
 }
 
 // 🚀 بدء
