@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-<title>USSD Scanner Pro</title>
+<title>Vodafone USSD Scanner</title>
 
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4/dist/tesseract.min.js"></script>
@@ -18,7 +18,7 @@
 <body class="bg-black text-white min-h-screen flex flex-col items-center p-4">
 
 <h1 class="text-2xl font-bold mb-4 text-center">
-📷 وجه الكاميرا على الكود
+📷 وجه الكاميرا على كارت فودافون
 </h1>
 
 <!-- الكاميرا -->
@@ -38,7 +38,7 @@
 ⏳ جاري التهيئة...
 </p>
 
-<!-- قائمة النتائج -->
+<!-- النتائج -->
 <div class="w-full max-w-md mt-6">
   <h2 class="text-xl font-bold mb-2">📋 الأكواد المكتشفة</h2>
   <div id="results" class="space-y-3"></div>
@@ -59,7 +59,7 @@ let busy = false;
 let streamRef = null;
 let detectedSet = new Set();
 
-// 🧠 استخراج ذكي (نظام محافظ)
+// 🧠 فلترة صارمة لفودافون فقط
 function extractUSSDSmart(text){
 
   if(!text) return [];
@@ -68,7 +68,7 @@ function extractUSSDSmart(text){
     .replace(/[Oo]/g, "0")
     .replace(/[lI]/g, "1");
 
-  const foundCodes = [];
+  const results = [];
   const lines = text.split(/\n|\r/);
 
   for(let line of lines){
@@ -77,31 +77,22 @@ function extractUSSDSmart(text){
       .replace(/\s/g, "")
       .replace(/[^\d*#]/g, "");
 
-    // كود كامل
-    const fullMatch = clean.match(/^\*\d{2,4}\*\d{10,20}#$/);
+    // ✅ كود فودافون كامل فقط
+    const fullMatch = clean.match(/^\*858\*(\d{13,16})#$/);
     if(fullMatch){
-      foundCodes.push(fullMatch[0]);
+      results.push(`*858*${fullMatch[1]}#`);
       continue;
     }
 
-    // رقم فقط
-    const numberMatch = clean.match(/^\d{10,20}$/);
+    // ✅ رقم الكارت فقط
+    const numberMatch = clean.match(/^(\d{13,16})$/);
     if(numberMatch){
-
-      const code = numberMatch[0];
-
-      function detectNetwork(len){
-        if(len === 14) return "*858*";
-        if(len === 15) return "*102*";
-        return "*858*";
-      }
-
-      const prefix = detectNetwork(code.length);
-      foundCodes.push(`${prefix}${code}#`);
+      results.push(`*858*${numberMatch[1]}#`);
+      continue;
     }
   }
 
-  return foundCodes;
+  return results;
 }
 
 // ➕ إضافة نتيجة
@@ -111,7 +102,7 @@ function addResult(code){
   detectedSet.add(code);
 
   const item = document.createElement("div");
-  item.className = "bg-gray-900 p-4 rounded-xl flex items-center justify-between";
+  item.className = "bg-gray-900 p-4 rounded-xl flex items-center justify-between gap-2";
 
   item.innerHTML = `
     <span class="text-sm break-all">${code}</span>
@@ -179,9 +170,7 @@ function startScanning(){
     try{
       const { data:{ text } } = await worker.recognize(canvas);
       const codes = extractUSSDSmart(text);
-
       codes.forEach(code => addResult(code));
-
     }catch(e){}
 
     busy = false;
