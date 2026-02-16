@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>ماسح كروت فودافون الذكي</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4/dist/tesseract.min.js"></script>
+
+    <script>
+        // إعدادات Tailwind لتخصيص حركة إطار المسح (Scanning Animation)
+        tailwind.config = {
+            theme: {
+                extend: {
+                    keyframes: {
+                        scan: {
+                            '0%': { transform: 'translateY(0)' },
+                            '100%': { transform: 'translateY(4rem)' },
+                        }
+                    },
+                    animation: {
+                        scan: 'scan 1.5s linear infinite alternate',
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        /* منع تحديث الصفحة عند السحب لأسفل في الموبايل */
+        body { overscroll-behavior-y: contain; touch-action: none; }
+    </style>
+</head>
+<body class="bg-black text-white h-screen w-screen overflow-hidden font-sans">
+
+    <div class="relative w-full h-full flex flex-col items-center justify-center">
+        
+        <video id="videoElement" class="absolute inset-0 w-full h-full object-cover" autoplay playsinline muted></video>
+
+        <div class="absolute inset-0 z-10 pointer-events-none border-[60px] border-black/70"></div>
+
+        <div id="scannerBox" class="z-20 w-3/4 max-w-sm h-20 border-2 border-green-500 rounded-xl relative shadow-[0_0_20px_rgba(34,197,94,0.6)] transition-all duration-300 overflow-hidden">
+            <div class="absolute inset-0 bg-green-500/10 animate-pulse"></div>
+            <div id="scanLine" class="absolute top-0 left-0 w-full h-1 bg-green-400 shadow-[0_0_10px_#4ade80] animate-scan"></div>
+        </div>
+
+        <div class="absolute bottom-12 z-30 flex flex-col items-center gap-4 w-full px-4 text-center">
+            
+            <div id="resultCard" class="hidden px-6 py-3 bg-green-600/90 rounded-2xl shadow-lg backdrop-blur-md transition-all">
+                <p class="text-sm text-green-100 mb-1">تم التقاط الكارت بنجاح</p>
+                <p id="scannedCode" class="text-2xl font-bold tracking-widest"></p>
+            </div>
+
+            <div id="statusBadge" class="px-5 py-2 bg-gray-900/80 rounded-full text-sm font-medium backdrop-blur-sm border border-gray-700">
+                جاري الإقلاع (Booting)...
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const video = document.getElementById('videoElement');
+        const statusBadge = document.getElementById('statusBadge');
+        const scannerBox = document.getElementById('scannerBox');
+        const resultCard = document.getElementById('resultCard');
+        const scannedCodeEl = document.getElementById('scannedCode');
+
+        let worker = null;
+        let isProcessing = false;
+        let lastScannedCode = null;
+        let isPaused = false;
+
+        // تحديث حالة النظام للمستخدم
+        function setStatus(message) {
+            statusBadge.innerText = message;
+        }
+
+        // 1. التهيئة الرئيسية
+        async function init() {
+            try {
+                setStatus('جاري تحميل محرك الذكاء الاصطناعي (OCR)...');
+                
+                // إنشاء Worker مرة واحدة فقط وتكوينه
+                worker = await Tesseract.createWorker({
+                    logger: m => {
+                        if (m.status === 'recognizing text' && m.progress === 1) {
+                           // وميض الإطار عند معالجة إطار بنجاح دلالة على النشاط
+                           scannerBox.style.borderColor = '#bef264'; // أخضر فاتح
+                           setTimeout(() => scannerBox.style.borderColor = '#22c55e', 150); // عودة للأخضر
+                        }
+                    }
+                });
+                
+                await worker.loadLanguage('eng');
+                await worker.initialize('eng');
+                // السماح فقط بالأرقام وبعض الحروف التي يخطئ فيها OCR
+                await worker.setParameters({
+                    tessedit_char_whitelist: '0123456789*#OlI',
+                });
+
+                setStatus('جاري فتح الكاميرا...');
+                await startCamera();
+                
+                setStatus('جاهز! قم بتوجيه الكاميرا للكارت');
+                
+                // بدء حلقة المسح
+                requestAnimationFrame(processFrame);
+
+            } catch (error) {
+                console.error(error);
+                setStatus('خطأ: لم نتمكن من تشغيل النظام. تأكد من الأذونات.');
+            }
+        }
+
+        // 2. تشغيل الكاميرا
+        async function startCamera() {
+            const constraints = {
+                video: {
+                    facingMode: "environment", // الكاميرا الخلفية
+                    advanced: [{ focusMode: "continuous" }] // محاولة تفعيل التركيز التلقائي المستمر
+                }
+            };
+
+            const stream = await navigator.mediaDevices.getUserMedia(constraints);
+            video.srcObject = stream;
+
+            return new Promise(resolve => {
+                video.onloadedmetadata = () => {
+                    video.play();
+                    resolve();
+                };
+            });
+        }
+
+        // 3. حلقة المعالجة والأداء (Frame Processing & Throttling)
+        async function processFrame() {
+            // منع التنفيذ إذا كان التطبيق متوقف مؤقتاً أو الـ Worker مشغول
+            if (isPaused || isProcessing || !worker || video.readyState !== video.HAVE_ENOUGH_DATA) {
+                requestAnimationFrame(processFrame);
+                return;
+            }
+
+            isProcessing = true;
+
+            try {
+                // استخدام OffscreenCanvas إن أمكن لدعم الأداء وعدم تجميد الـ UI
+                const width = video.videoWidth * 0.5; // تصغير الدقة للنصف لتسريع الـ OCR
+                const height = video.videoHeight * 0.5;
+                
+                let canvas, ctx;
+                if (window.OffscreenCanvas) {
+                    canvas = new OffscreenCanvas(width, height);
+                    ctx = canvas.getContext('2d', { willReadFrequently: true });
+                } else {
+                    canvas = document.createElement('canvas');
+                    canvas.width = width;
+                    canvas.height = height;
+                    ctx = canvas.getContext('2d', { willReadFrequently: true });
+                }
+
+                ctx.drawImage(video, 0, 0, width, height);
+
+                // تنفيذ التعرف على النص
+                const result = await worker.recognize(canvas);
+                analyzeText(result.data.text);
+
+            } catch (err) {
+                console.error('OCR Error:', err);
+            }
+
+            isProcessing = false;
+            
+            // Frame Throttling: الانتظار 300 مللي ثانية قبل الإطار التالي لتخفيف الحمل على الموبايل
+            setTimeout(() => {
+                requestAnimationFrame(processFrame);
+            }, 300);
+        }
+
+        // 4. استخراج الكود بذكاء (Extraction Logic)
+        function analyzeText(text) {
+            if (!text || text.trim() === '') return;
+
+            // تصحيح الأخطاء الشائعة في الـ OCR
+            let cleanedText = text.replace(/[Ol]/ig, '0').replace(/[I]/ig, '1');
+            
+            // فصل الأسطر لمنع دمج أرقام من أسطر مختلفة
+            const lines = cleanedText.split('\n');
+            let extractedNumber = null;
+
+            for (let line of lines) {
+                // البحث عن سلسلة أرقام متصلة بطول 12 إلى 16 رقم
+                const match = line.match(/\d{12,16}/);
+                if (match) {
+                    extractedNumber = match[0];
+                    break;
+                }
+            }
+
+            // التأكد من أن الرقم ليس نفسه الممسوح في المرة السابقة (لمنع التكرار الفوري)
+            if (extractedNumber && extractedNumber !== lastScannedCode) {
+                triggerSuccess(extractedNumber);
+            }
+        }
+
+        // 5. إجراء النجاح والاتصال
+        function triggerSuccess(cardNumber) {
+            isPaused = true; // إيقاف المسح مؤقتاً
+            lastScannedCode = cardNumber;
+
+            // اهتزاز الجهاز إذا كان مدعوماً
+            if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+
+            // تفاعلات الواجهة
+            scannerBox.classList.remove('border-green-500');
+            scannerBox.classList.add('border-white', 'bg-green-500/40');
+            
+            scannedCodeEl.innerText = cardNumber;
+            resultCard.classList.remove('hidden');
+            setStatus('جاري الاتصال... (Dialing)');
+
+            // تأخير بسيط للمؤثرات البصرية ثم الاتصال
+            setTimeout(() => {
+                // بناء كود الـ USSD: *858*cardNumber#
+                // يجب استخدام %23 بدلاً من # في روابط tel:
+                const ussdCode = `*858*${cardNumber}%23`;
+                window.location.href = `tel:${ussdCode}`;
+
+                // إعادة تفعيل النظام بعد ثانيتين استعداداً لكارت جديد
+                setTimeout(resetScanner, 2000);
+            }, 800);
+        }
+
+        // 6. إعادة ضبط الماسح
+        function resetScanner() {
+            scannerBox.classList.add('border-green-500');
+            scannerBox.classList.remove('border-white', 'bg-green-500/40');
+            resultCard.classList.add('hidden');
+            setStatus('جاهز! قم بتوجيه الكاميرا للكارت');
+            isPaused = false;
+            // يمكن تصفير lastScannedCode بعد فترة أطول لتسمح بقراءة كروت أخرى
+            setTimeout(() => { lastScannedCode = null; }, 5000); 
+        }
+
+        // بدء التشغيل عند تحميل الصفحة
+        window.addEventListener('load', init);
+
+    </script>
+</body>
+</html>
